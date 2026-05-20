@@ -1,0 +1,18 @@
+-- Non-superuser role for the API so PostgreSQL RLS is enforced (superusers bypass RLS).
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'contextual_app') THEN
+    CREATE ROLE contextual_app WITH LOGIN PASSWORD 'maestro_dev'
+      NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;
+  END IF;
+END
+$$;
+
+GRANT CONNECT ON DATABASE maestro TO contextual_app;
+GRANT USAGE, CREATE ON SCHEMA public TO contextual_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO contextual_app;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO contextual_app;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+  GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO contextual_app;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+  GRANT USAGE, SELECT ON SEQUENCES TO contextual_app;

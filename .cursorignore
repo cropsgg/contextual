@@ -1,0 +1,51 @@
+# Keep Cursor/Claude agents fast — exclude bulky or sensitive paths from indexing.
+# Reload the window after editing this file.
+
+# Secrets (never index)
+.env
+.env.*
+!.env.example
+server/.env
+client/.env.local
+
+# Python (~150MB+)
+server/.venv/
+**/__pycache__/
+**/*.py[cod]
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+htmlcov/
+.coverage
+*.egg-info/
+
+# Node / Next.js (~600MB+)
+**/node_modules/
+**/.next/
+client/out/
+**/*.tsbuildinfo
+
+# Build, caches, logs
+dist/
+build/
+.turbo/
+**/*.log
+**/*.map
+
+# Docker / local DB volume
+postgres-data/
+
+# OS & IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Binary / generated QA assets (markdown in docs/ stays indexed)
+docs/qa-screenshots/
+**/*.png
+**/*.jpg
+**/*.jpeg
+**/*.gif
+**/*.webp
+**/*.pdf

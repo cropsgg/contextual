@@ -1,0 +1,28 @@
+---
+description: Keep agents fast — avoid indexing noise and expensive tool loops
+alwaysApply: true
+---
+
+# Agent performance (Contextual Maestro)
+
+This repo is small (~200 source files) when ignores are respected. Lag usually comes from indexing `node_modules`, `.next`, or `.venv`, or from broad searches.
+
+## Do
+
+- Rely on `.cursorignore` / `.gitignore` — do not read or search under `client/node_modules/`, `client/.next/`, or `server/.venv/`.
+- Prefer targeted `Grep` / `Glob` / single-file `Read` over listing whole trees.
+- Scope work to `client/` or `server/` when possible.
+- Run one dev service at a time if the machine feels slow (Postgres in Docker + either API or UI).
+
+## Avoid
+
+- `@`-mentioning the whole repo or `node_modules`.
+- Re-indexing by opening huge generated folders.
+- Long parallel shell + browser + docker unless needed for QA.
+- Reading lockfiles (`bun.lock`) unless debugging dependencies.
+
+## Stack reminders
+
+- API: `server/` (FastAPI, port 8000)
+- UI: `client/` (Next.js, port 3000)
+- DB: Docker Postgres on host port 5433

@@ -3,7 +3,6 @@
 import logging
 
 from sqlalchemy import create_engine, text
-from sqlalchemy.engine.url import make_url
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from app.core.config import settings
@@ -633,25 +632,23 @@ def _migrate_ann_index(conn) -> None:
         )
 
 
-def _admin_database_name() -> str:
-    """Database name from ADMIN_DATABASE_URL (e.g. maestro locally, railway on Railway)."""
-    url = make_url(settings.admin_database_url or settings.database_url)
-    name = url.database
-    if not name:
-        msg = "ADMIN_DATABASE_URL must include a database name (path after host/port)."
-        raise ValueError(msg)
-    if not name.replace("_", "").isalnum():
-        raise ValueError(f"Unsafe database name in connection URL: {name!r}")
-    return name
+# Serialize role/grant bootstrap — concurrent Railway replicas otherwise race on
+# GRANT CONNECT (pg_database "tuple concurrently updated").
+_BOOTSTRAP_ADVISORY_LOCK_KEY = 87234921
 
 
 def _ensure_app_role(conn) -> None:
     """Create non-superuser app role so FORCE RLS applies to API connections."""
-    db_name = _admin_database_name()
+    conn.execute(
+        text("SELECT pg_advisory_xact_lock(:key)"),
+        {"key": _BOOTSTRAP_ADVISORY_LOCK_KEY},
+    )
     exists = conn.execute(
         text("SELECT 1 FROM pg_roles WHERE rolname = 'contextual_app'")
     ).fetchone()
 
+    # CONNECT updates pg_database and races when several Railway containers start together.
+    # Run it only once, inside the role-creation block; never on redeploy.
     if not exists:
         pwd = settings.app_db_password.replace("'", "''")
         conn.execute(
@@ -662,14 +659,18 @@ def _ensure_app_role(conn) -> None:
                   IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'contextual_app') THEN
                     CREATE ROLE contextual_app WITH LOGIN PASSWORD '{pwd}'
                       NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;
+                    EXECUTE format(
+                      'GRANT CONNECT ON DATABASE %I TO contextual_app',
+                      current_database()
+                    );
                   END IF;
                 END
                 $$;
                 """
             )
         )
-    grants = [
-        f"GRANT CONNECT ON DATABASE {db_name} TO contextual_app",
+
+    schema_grants = (
         "GRANT USAGE, CREATE ON SCHEMA public TO contextual_app",
         "GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO contextual_app",
         "GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO contextual_app",
@@ -681,8 +682,8 @@ def _ensure_app_role(conn) -> None:
             "ALTER DEFAULT PRIVILEGES IN SCHEMA public "
             "GRANT USAGE, SELECT ON SEQUENCES TO contextual_app"
         ),
-    ]
-    for stmt in grants:
+    )
+    for stmt in schema_grants:
         conn.execute(text(stmt))
 
 

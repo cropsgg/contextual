@@ -47,6 +47,7 @@ from app.services.fact_extraction_v2 import (
     fact_extraction_lock,
     maybe_schedule_extractions,
 )
+from app.services.turn_embedding import embed_new_turns
 from app.services.session_titles import generate_session_title
 
 logger = logging.getLogger(__name__)
@@ -56,6 +57,18 @@ router = APIRouter()
 
 def _sse(event: str, data: dict[str, Any]) -> str:
     return f"event: {event}\ndata: {json.dumps(data)}\n\n"
+
+
+async def _embed_episode_ids(user_id: int, episode_ids: list[int]) -> None:
+    from app.services.turn_embedding import embed_episodes_by_ids
+
+    db = open_tenant_session(user_id)
+    try:
+        await embed_episodes_by_ids(db, user_id, episode_ids)
+    except Exception:
+        logger.exception("Background turn embedding failed")
+    finally:
+        db.close()
 
 
 async def _maybe_extract_facts(
@@ -135,6 +148,7 @@ async def chat(
     finally:
         quota_db.close()
 
+    user_episode_id: int | None = None
     db = open_tenant_session(user_id)
     try:
         user_message_count = db.execute(
@@ -167,8 +181,26 @@ async def chat(
         )
         invalidate_user_caches(db, user_id, session_id)
         db.commit()
+        user_episode_id = db.scalar(
+            select(Episode.id)
+            .where(
+                Episode.user_id == user_id,
+                Episode.session_id == session_id,
+                Episode.episode_kind == "message",
+                Episode.role == "user",
+            )
+            .order_by(Episode.created_at.desc(), Episode.id.desc())
+            .limit(1)
+        )
     finally:
         db.close()
+
+    if user_episode_id is not None:
+        track_background_task(
+            asyncio.create_task(
+                _embed_episode_ids(user_id, [int(user_episode_id)])
+            )
+        )
 
     if session_message_count == 1:
         track_background_task(
@@ -188,7 +220,11 @@ async def chat(
             )
             if (
                 count_active_prompt_tokens(
-                    db, user_id, session_id, enhanced=enhanced
+                    db,
+                    user_id,
+                    session_id,
+                    enhanced=enhanced,
+                    current_query=user_message,
                 )
                 > settings.context_threshold_tokens
             ):
@@ -223,7 +259,11 @@ async def chat(
                 )
                 if (
                     count_active_prompt_tokens(
-                        db, user_id, session_id, enhanced=enhanced
+                        db,
+                        user_id,
+                        session_id,
+                        enhanced=enhanced,
+                        current_query=user_message,
                     )
                     > settings.context_threshold_tokens
                 ):
@@ -241,10 +281,18 @@ async def chat(
                         },
                     )
             messages = build_completion_messages(
-                db, user_id, session_id, enhanced=enhanced
+                db,
+                user_id,
+                session_id,
+                enhanced=enhanced,
+                current_query=user_message,
             )
             estimated_tokens = count_active_prompt_tokens(
-                db, user_id, session_id, enhanced=enhanced
+                db,
+                user_id,
+                session_id,
+                enhanced=enhanced,
+                current_query=user_message,
             )
             assert_preflight_estimated_tokens(db, current_user, estimated_tokens)
             db.commit()
@@ -300,7 +348,11 @@ async def chat(
             try:
                 metadata = None
                 if enhanced_for_persist is not None:
-                    metadata = build_attribution_metadata(enhanced_for_persist)
+                    metadata = build_attribution_metadata(
+                        enhanced_for_persist,
+                        user_id=user_id,
+                        session_id=session_id,
+                    )
                 ep = Episode(
                     user_id=user_id,
                     session_id=session_id,
@@ -390,6 +442,9 @@ async def chat(
 
         track_background_task(
             asyncio.create_task(run_post_turn_compression(user_id, session_id))
+        )
+        track_background_task(
+            asyncio.create_task(embed_new_turns(user_id, session_id))
         )
         track_background_task(
             asyncio.create_task(

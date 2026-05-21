@@ -26,6 +26,7 @@ def _prompt_cache_key(
     user_id: int,
     session_id: str,
     enhanced: EnhancedContext | None,
+    current_query: str = "",
 ) -> str:
     from app.services.context_manager import (
         latest_memory_episode,
@@ -47,7 +48,13 @@ def _prompt_cache_key(
         enhanced_part = hashlib.sha256(
             str(len(enhanced.injected_facts)).encode()
         ).hexdigest()[:8]
-    return f"prompt:{user_id}:{session_id}:{active_count}:{mem_id}:{fv}:{enhanced_part}"
+    query_part = ""
+    if settings.selective_context_enabled and current_query.strip():
+        query_part = hashlib.sha256(current_query.strip().encode()).hexdigest()[:12]
+    return (
+        f"prompt:{user_id}:{session_id}:{active_count}:{mem_id}:{fv}:"
+        f"{enhanced_part}:{query_part}"
+    )
 
 
 def get_or_build_completion_messages(
@@ -55,15 +62,23 @@ def get_or_build_completion_messages(
     user_id: int,
     session_id: str,
     enhanced: EnhancedContext | None = None,
+    *,
+    current_query: str = "",
 ) -> list[dict[str, str]]:
     from app.services.context_manager import _build_completion_messages_uncached
 
     if not settings.prompt_assembly_cache_enabled:
         return _build_completion_messages_uncached(
-            db, user_id, session_id, enhanced=enhanced
+            db,
+            user_id,
+            session_id,
+            enhanced=enhanced,
+            current_query=current_query,
         )
 
-    key = _prompt_cache_key(db, user_id, session_id, enhanced)
+    key = _prompt_cache_key(
+        db, user_id, session_id, enhanced, current_query=current_query
+    )
     set_bypass_rls(db, enabled=True)
     try:
         row = db.scalar(
@@ -76,7 +91,11 @@ def get_or_build_completion_messages(
             return list(row.messages_json)
 
         messages = _build_completion_messages_uncached(
-            db, user_id, session_id, enhanced=enhanced
+            db,
+            user_id,
+            session_id,
+            enhanced=enhanced,
+            current_query=current_query,
         )
         token_count = count_chat_messages_tokens(messages)
         expires = datetime.now(timezone.utc) + timedelta(

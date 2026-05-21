@@ -9,3 +9,12 @@ export function isDebugQueryEnabled(search: string): boolean {
   const q = search.startsWith("?") ? search.slice(1) : search;
   return new URLSearchParams(q).get("debug") === "1";
 }
+
+/** Context monitor, Sources panel, memory inspector — not shown to normal chat users. */
+export function isEngineeringUiEnabled(
+  search: string = typeof window !== "undefined"
+    ? window.location.search
+    : "",
+): boolean {
+  return isDevToolsEnabledFromEnv() || isDebugQueryEnabled(search);
+}

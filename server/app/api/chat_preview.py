@@ -114,7 +114,11 @@ async def preview_chat(
                     db, user_id, session_id, user_message
                 )
             messages = build_completion_messages(
-                db, user_id, session_id, enhanced=enhanced
+                db,
+                user_id,
+                session_id,
+                enhanced=enhanced,
+                current_query=user_message,
             )
 
         messages.append({"role": "user", "content": user_message})

@@ -501,7 +501,12 @@ def format_enhanced_system_blocks(ctx: AssembledContext) -> list[dict[str, str]]
     return blocks
 
 
-def build_attribution_metadata(ctx: AssembledContext) -> dict:
+def build_attribution_metadata(
+    ctx: AssembledContext,
+    *,
+    user_id: int | None = None,
+    session_id: str | None = None,
+) -> dict:
     memories_out: list[dict] = []
     for m in ctx.cross_session_memories:
         memories_out.append(
@@ -523,21 +528,32 @@ def build_attribution_metadata(ctx: AssembledContext) -> dict:
                 "scope": "in_session",
             }
         )
-    return {
-        "attribution": {
-            "facts": [
-                {
-                    "fact_key": f.fact_key,
-                    "fact_value": f.fact_value,
-                    "selection_reason": f.selection_reason,
-                    "pinned": f.pinned,
-                }
-                for f in ctx.injected_facts
-            ],
-            "memories": memories_out,
-            "retrieval": ctx.retrieval.to_attribution_dict(),
-        }
+    attribution: dict = {
+        "facts": [
+            {
+                "fact_key": f.fact_key,
+                "fact_value": f.fact_value,
+                "selection_reason": f.selection_reason,
+                "pinned": f.pinned,
+            }
+            for f in ctx.injected_facts
+        ],
+        "memories": memories_out,
+        "retrieval": ctx.retrieval.to_attribution_dict(),
     }
+    if user_id is not None and session_id is not None:
+        from app.services.context_packer import get_last_pack_attribution
+
+        pack_attr = get_last_pack_attribution(user_id, session_id)
+        if pack_attr is not None:
+            attribution["active_turns_selected"] = pack_attr.active_turns_selected
+            attribution["active_turns_floor"] = pack_attr.active_turns_floor
+            attribution["packer"] = pack_attr.packer
+            if pack_attr.active_retrieval_degraded:
+                retrieval_block = attribution.get("retrieval")
+                if isinstance(retrieval_block, dict):
+                    retrieval_block["active_turn_degraded"] = True
+    return {"attribution": attribution}
 
 
 def latest_memory_episode(
@@ -562,11 +578,17 @@ def build_completion_messages(
     user_id: int,
     session_id: str,
     enhanced: EnhancedContext | None = None,
+    *,
+    current_query: str = "",
 ) -> list[dict[str, str]]:
     from app.services.prompt_assembly_cache import get_or_build_completion_messages
 
     return get_or_build_completion_messages(
-        db, user_id, session_id, enhanced=enhanced
+        db,
+        user_id,
+        session_id,
+        enhanced=enhanced,
+        current_query=current_query,
     )
 
 
@@ -575,25 +597,19 @@ def _build_completion_messages_uncached(
     user_id: int,
     session_id: str,
     enhanced: EnhancedContext | None = None,
+    *,
+    current_query: str = "",
 ) -> list[dict[str, str]]:
-    memory = latest_memory_episode(db, user_id, session_id)
-    active = load_active_message_episodes(db, user_id, session_id)
-    messages: list[dict[str, str]] = [
-        {"role": "system", "content": settings.chat_system_prompt},
-    ]
-    if enhanced is not None:
-        messages.extend(format_enhanced_system_blocks(enhanced))
-    if memory:
-        messages.append(
-            {
-                "role": "system",
-                "content": f"Compressed context:\n{memory.content}",
-            }
-        )
-    for ep in active:
-        role = ep.role if ep.role in ("user", "assistant", "system") else "user"
-        messages.append({"role": role, "content": ep.content})
-    return messages
+    from app.services.context_packer import pack_sync
+
+    result = pack_sync(
+        db,
+        user_id,
+        session_id,
+        current_query or "",
+        enhanced=enhanced,
+    )
+    return result.messages
 
 
 def count_active_prompt_tokens(
@@ -601,9 +617,17 @@ def count_active_prompt_tokens(
     user_id: int,
     session_id: str,
     enhanced: EnhancedContext | None = None,
+    *,
+    current_query: str = "",
 ) -> int:
     return count_chat_messages_tokens(
-        build_completion_messages(db, user_id, session_id, enhanced=enhanced)
+        build_completion_messages(
+            db,
+            user_id,
+            session_id,
+            enhanced=enhanced,
+            current_query=current_query,
+        )
     )
 
 
@@ -766,9 +790,21 @@ async def reduce_once(
     )
     try:
         db.add(mem)
+        offload_ids = [ep.id for ep in to_offload]
         for ep in to_offload:
             ep.is_offloaded = True
             ep.offloaded_at = now
+        if offload_ids:
+            chunk_rows = db.scalars(
+                select(Episode).where(
+                    Episode.parent_episode_id.in_(offload_ids),
+                    Episode.episode_kind == "message_chunk",
+                )
+            ).all()
+            for ch in chunk_rows:
+                ch.is_offloaded = True
+                ch.offloaded_at = now
+                ch.embed_status = "skipped"
         if dry_run:
             db.flush()
             set_tenant_context(db, user_id)

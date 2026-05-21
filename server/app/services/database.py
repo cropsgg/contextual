@@ -656,11 +656,12 @@ def _ensure_app_role(conn) -> None:
         text("SELECT pg_advisory_xact_lock(:key)"),
         {"key": _BOOTSTRAP_ADVISORY_LOCK_KEY},
     )
-    db_name = _admin_database_name()
     exists = conn.execute(
         text("SELECT 1 FROM pg_roles WHERE rolname = 'contextual_app'")
     ).fetchone()
 
+    # CONNECT updates pg_database and races when several Railway containers start together.
+    # Run it only once, inside the role-creation block; never on redeploy.
     if not exists:
         pwd = settings.app_db_password.replace("'", "''")
         conn.execute(
@@ -671,23 +672,18 @@ def _ensure_app_role(conn) -> None:
                   IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'contextual_app') THEN
                     CREATE ROLE contextual_app WITH LOGIN PASSWORD '{pwd}'
                       NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;
+                    EXECUTE format(
+                      'GRANT CONNECT ON DATABASE %I TO contextual_app',
+                      current_database()
+                    );
                   END IF;
                 END
                 $$;
                 """
             )
         )
-    needs_connect = conn.execute(
-        text(
-            "SELECT NOT has_database_privilege('contextual_app', :db, 'CONNECT')"
-        ),
-        {"db": db_name},
-    ).scalar()
-    grants: list[str] = []
-    if needs_connect:
-        grants.append(f"GRANT CONNECT ON DATABASE {db_name} TO contextual_app")
-    grants.extend(
-        [
+
+    schema_grants = (
         "GRANT USAGE, CREATE ON SCHEMA public TO contextual_app",
         "GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO contextual_app",
         "GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO contextual_app",
@@ -699,9 +695,8 @@ def _ensure_app_role(conn) -> None:
             "ALTER DEFAULT PRIVILEGES IN SCHEMA public "
             "GRANT USAGE, SELECT ON SEQUENCES TO contextual_app"
         ),
-        ]
     )
-    for stmt in grants:
+    for stmt in schema_grants:
         conn.execute(text(stmt))
 
 

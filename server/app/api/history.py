@@ -15,6 +15,8 @@ from app.schemas import (
     AttributionFactItem,
     AttributionMemoryItem,
     AttributionOut,
+    AttributionActiveTurnOut,
+    AttributionPackerOut,
     AttributionRetrievalOut,
     ContextStatusOut,
     MessageOut,
@@ -314,4 +316,50 @@ def get_attribution(
             ),
         )
 
-    return AttributionOut(facts=facts, memories=memories, retrieval=retrieval_out)
+    active_turns_selected: list[AttributionActiveTurnOut] = []
+    floor_ids: list[int] = []
+    packer_out: AttributionPackerOut | None = None
+    if isinstance(attr, dict):
+        for item in attr.get("active_turns_selected") or []:
+            if isinstance(item, dict) and "episode_id" in item:
+                active_turns_selected.append(
+                    AttributionActiveTurnOut(
+                        episode_id=int(item["episode_id"]),
+                        score=_safe_float(item.get("score")),
+                        reason=(
+                            str(item["reason"]) if item.get("reason") else None
+                        ),
+                    )
+                )
+        raw_floor = attr.get("active_turns_floor")
+        if isinstance(raw_floor, list):
+            floor_ids = [int(x) for x in raw_floor if isinstance(x, int) or str(x).isdigit()]
+        pack_raw = attr.get("packer")
+        if isinstance(pack_raw, dict):
+            packer_out = AttributionPackerOut(
+                budget=int(pack_raw["budget"]) if pack_raw.get("budget") is not None else None,
+                tokens_used=(
+                    int(pack_raw["tokens_used"])
+                    if pack_raw.get("tokens_used") is not None
+                    else None
+                ),
+                evictions=(
+                    int(pack_raw["evictions"])
+                    if pack_raw.get("evictions") is not None
+                    else None
+                ),
+                selective_context_enabled=(
+                    bool(pack_raw["selective_context_enabled"])
+                    if pack_raw.get("selective_context_enabled") is not None
+                    else None
+                ),
+            )
+
+    return AttributionOut(
+        facts=facts,
+        memories=memories,
+        retrieval=retrieval_out,
+        active_turns_selected=active_turns_selected,
+        active_turns_floor=floor_ids,
+        packer=packer_out,
+    )

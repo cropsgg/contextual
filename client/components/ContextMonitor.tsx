@@ -16,6 +16,7 @@ import { API_URL } from "@/lib/api";
 
 export type ContextStatus = {
   active_token_count: number;
+  packed_token_count?: number | null;
   context_threshold: number;
   offloaded_message_count: number;
   memory_chunk_count: number;
@@ -238,7 +239,7 @@ export function ContextMonitor({
               layout
               className="mb-1 flex justify-between text-[10px] text-zinc-500"
             >
-              <span>Active tokens</span>
+              <span>Transcript tokens</span>
               <span>
                 {data.active_token_count.toLocaleString()} /{" "}
                 {data.context_threshold.toLocaleString()}
@@ -258,6 +259,11 @@ export function ContextMonitor({
                 transition={{ type: "spring", stiffness: 120, damping: 18 }}
               />
             </div>
+            {data.packed_token_count != null ? (
+              <p className="mt-1 text-[10px] text-zinc-500">
+                Packed prompt: {data.packed_token_count.toLocaleString()} tokens
+              </p>
+            ) : null}
           </motion.div>
 
           <motion.div

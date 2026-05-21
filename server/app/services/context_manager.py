@@ -612,6 +612,20 @@ def _build_completion_messages_uncached(
     return result.messages
 
 
+def count_active_transcript_tokens(
+    db: Session,
+    user_id: int,
+    session_id: str,
+) -> int:
+    """Non-offloaded chat turns only — used for compression threshold decisions."""
+    active = load_active_message_episodes(db, user_id, session_id)
+    messages: list[dict[str, str]] = []
+    for ep in active:
+        role = ep.role if ep.role in ("user", "assistant", "system") else "user"
+        messages.append({"role": role, "content": ep.content})
+    return count_chat_messages_tokens(messages)
+
+
 def count_active_prompt_tokens(
     db: Session,
     user_id: int,
@@ -620,6 +634,7 @@ def count_active_prompt_tokens(
     *,
     current_query: str = "",
 ) -> int:
+    """Packed completion size (selective context) — used for quota preflight."""
     return count_chat_messages_tokens(
         build_completion_messages(
             db,
@@ -629,6 +644,18 @@ def count_active_prompt_tokens(
             current_query=current_query,
         )
     )
+
+
+def count_compression_threshold_tokens(
+    db: Session,
+    user_id: int,
+    session_id: str,
+    *,
+    enhanced: EnhancedContext | None = None,
+) -> int:
+    """Alias: compression triggers on raw transcript size, not packed prompt."""
+    _ = enhanced
+    return count_active_transcript_tokens(db, user_id, session_id)
 
 
 async def _embed_with_retry(summary_text: str) -> list[float]:
@@ -834,7 +861,9 @@ async def reduce_until_under(
 ) -> CompressionMetrics:
     """Run reduce_once until under threshold. Raises CompressionError on hard failure."""
     limit = threshold if threshold is not None else settings.context_threshold_tokens
-    tokens_before = count_active_prompt_tokens(db, user_id, session_id, enhanced=enhanced)
+    tokens_before = count_compression_threshold_tokens(
+        db, user_id, session_id, enhanced=enhanced
+    )
 
     if tokens_before <= limit:
         metrics = CompressionMetrics(
@@ -874,7 +903,7 @@ async def reduce_until_under(
     rounds = 0
     projected_offload = 0
     for _ in range(max_rounds):
-        active_tokens = count_active_prompt_tokens(
+        active_tokens = count_compression_threshold_tokens(
             db, user_id, session_id, enhanced=enhanced
         )
         if active_tokens <= limit:
@@ -936,7 +965,9 @@ async def reduce_until_under(
             break
         rounds += 1
 
-    active_tokens = count_active_prompt_tokens(db, user_id, session_id, enhanced=enhanced)
+    active_tokens = count_compression_threshold_tokens(
+        db, user_id, session_id, enhanced=enhanced
+    )
     if active_tokens <= limit:
         metrics = CompressionMetrics(
             compression_attempted=True,
@@ -1022,7 +1053,8 @@ def context_status(db: Session, user_id: int, session_id: str) -> dict:
             Episode.episode_kind == "memory",
         )
     )
-    tokens = count_active_prompt_tokens(db, user_id, session_id)
+    tokens = count_active_transcript_tokens(db, user_id, session_id)
+    packed_tokens = count_active_prompt_tokens(db, user_id, session_id)
     last_metrics = get_last_compression_metrics(user_id, session_id)
     memory_paused = bool(
         last_metrics
@@ -1046,6 +1078,7 @@ def context_status(db: Session, user_id: int, session_id: str) -> dict:
 
     return {
         "active_token_count": tokens,
+        "packed_token_count": packed_tokens,
         "context_threshold": settings.context_threshold_tokens,
         "offloaded_message_count": offloaded_count,
         "memory_chunk_count": int(memory_n or 0),
@@ -1119,7 +1152,7 @@ async def run_post_turn_compression(user_id: int, session_id: str) -> None:
                         )
                         return
                 if (
-                    count_active_prompt_tokens(db, user_id, session_id)
+                    count_active_transcript_tokens(db, user_id, session_id)
                     <= settings.context_threshold_tokens
                 ):
                     logger.debug(

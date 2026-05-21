@@ -26,6 +26,7 @@ from app.services.context_manager import (
     build_completion_messages,
     build_enhanced_context,
     compression_lock,
+    count_active_transcript_tokens,
     count_active_prompt_tokens,
     reduce_until_under,
 )
@@ -80,7 +81,7 @@ async def preview_chat(
         lock = compression_lock(user_id, session_id)
         async with lock:
             if (
-                count_active_prompt_tokens(db, user_id, session_id, enhanced=enhanced)
+                count_active_transcript_tokens(db, user_id, session_id)
                 > settings.context_threshold_tokens
             ):
                 would_compress = True

@@ -214,6 +214,15 @@ async def process_extraction_run(db: Session, run_id: int, user_id: int) -> bool
         run.last_error = None
         _mark_user_extraction_success(db, user_id)
         db.commit()
+        logger.info(
+            "fact_extraction user_id=%s scope=%s status=succeeded skipped=%s "
+            "upserted=%s deleted=%s",
+            user_id,
+            run.scope,
+            result.get("skipped", ""),
+            result.get("upserted", 0),
+            result.get("deleted", 0),
+        )
         return True
     except Exception as exc:
         db.rollback()

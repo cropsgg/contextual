@@ -2,22 +2,26 @@
 
 import os
 import uuid
+from urllib.parse import urlparse
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import delete, select
+from sqlalchemy import create_engine, delete, select, text
 
-# Use test database if provided, else default dev DB
-os.environ.setdefault(
-    "DATABASE_URL",
-    os.environ.get(
-        "TEST_DATABASE_URL",
-        "postgresql+psycopg2://contextual_app:maestro_dev@127.0.0.1:5433/maestro",
-    ),
+_TEST_DB_URL = os.environ.get(
+    "TEST_DATABASE_URL",
+    "postgresql+psycopg2://contextual_app:maestro_dev@127.0.0.1:5433/maestro_test",
+)
+_ADMIN_DB_URL = os.environ.get(
+    "ADMIN_DATABASE_URL",
+    "postgresql+psycopg2://maestro:maestro_dev@127.0.0.1:5433/maestro",
 )
 
+os.environ.setdefault("DATABASE_URL", _TEST_DB_URL)
+os.environ.setdefault("ADMIN_DATABASE_URL", _ADMIN_DB_URL)
+
 from app.core.config import get_settings
-from app.core.security import create_access_token, hash_password
+from app.core.security import create_access_token
 from app.main import app
 from app.models.chat_session import ChatSession
 from app.models.episode import Episode
@@ -30,8 +34,65 @@ from app.services.rls import set_bypass_rls, set_tenant_context
 get_settings.cache_clear()
 
 
+def _test_database_name() -> str:
+    parsed = urlparse(_TEST_DB_URL.replace("postgresql+psycopg2://", "postgresql://"))
+    return (parsed.path or "/maestro_test").lstrip("/")
+
+
+def _ensure_test_database() -> None:
+    db_name = _test_database_name()
+    admin = create_engine(_ADMIN_DB_URL, isolation_level="AUTOCOMMIT")
+    with admin.connect() as conn:
+        exists = conn.execute(
+            text("SELECT 1 FROM pg_database WHERE datname = :name"),
+            {"name": db_name},
+        ).fetchone()
+        if exists:
+            return
+        conn.execute(text(f'CREATE DATABASE "{db_name}" OWNER maestro'))
+    app_db = create_engine(
+        _ADMIN_DB_URL.rsplit("/", 1)[0] + f"/{db_name}",
+        isolation_level="AUTOCOMMIT",
+    )
+    with app_db.connect() as conn:
+        conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+        conn.execute(text(f"GRANT CONNECT ON DATABASE {db_name} TO contextual_app"))
+        conn.execute(text("GRANT USAGE, CREATE ON SCHEMA public TO contextual_app"))
+        conn.execute(
+            text(
+                "GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public "
+                "TO contextual_app"
+            )
+        )
+        conn.execute(
+            text(
+                "GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO contextual_app"
+            )
+        )
+
+
+def _admin_test_database_url() -> str:
+    db_name = _test_database_name()
+    return _ADMIN_DB_URL.rsplit("/", 1)[0] + f"/{db_name}"
+
+
 @pytest.fixture(scope="session", autouse=True)
 def _init_db():
+    _ensure_test_database()
+    os.environ["ADMIN_DATABASE_URL"] = _admin_test_database_url()
+    get_settings.cache_clear()
+    # Rebind engines after admin URL targets the isolated test database.
+    from app.services import database as db_module
+
+    db_module.admin_engine.dispose()
+    db_module.engine.dispose()
+    db_module.admin_engine = create_engine(
+        os.environ["ADMIN_DATABASE_URL"], pool_pre_ping=True
+    )
+    db_module.engine = create_engine(
+        os.environ["DATABASE_URL"], pool_pre_ping=True
+    )
+    db_module.SessionLocal.configure(bind=db_module.engine)
     init_extensions()
     create_db_and_tables()
     migrate_schema()

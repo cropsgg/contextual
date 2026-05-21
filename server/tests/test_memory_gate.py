@@ -61,7 +61,7 @@ def test_has_memory_signals_memory_summary_section():
 
 
 @pytest.mark.asyncio
-async def test_extract_gated_skips_when_no_signals():
+async def test_extract_gated_skips_when_no_signals_and_flag_true():
     with patch.object(settings, "memory_gate_enabled", True), patch.object(
         settings, "memory_extraction_skip_if_no_signals", True
     ):
@@ -71,6 +71,21 @@ async def test_extract_gated_skips_when_no_signals():
         )
     assert result.skipped == "no_memory_signals"
     assert result.changes == []
+
+
+@pytest.mark.asyncio
+async def test_extract_gated_session_runs_on_cadence_without_signal_words():
+    with patch.object(settings, "memory_gate_enabled", True), patch(
+        "app.services.memory_gate.propose_fact_candidates",
+        new_callable=AsyncMock,
+        return_value=[],
+    ) as propose:
+        result = await extract_gated_fact_changes(
+            "## Recent messages\nuser: OK\nuser: thanks",
+            scope="session",
+        )
+    assert result.skipped is None
+    propose.assert_awaited_once()
 
 
 @pytest.mark.asyncio

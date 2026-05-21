@@ -114,6 +114,7 @@ class MessageOut(BaseModel):
 
 class ContextStatusOut(BaseModel):
     active_token_count: int
+    packed_token_count: int | None = None
     context_threshold: int
     offloaded_message_count: int
     memory_chunk_count: int
@@ -212,10 +213,26 @@ class AttributionRetrievalOut(BaseModel):
     failure_reason: str | None = None
 
 
+class AttributionActiveTurnOut(BaseModel):
+    episode_id: int
+    score: float | None = None
+    reason: str | None = None
+
+
+class AttributionPackerOut(BaseModel):
+    budget: int | None = None
+    tokens_used: int | None = None
+    evictions: int | None = None
+    selective_context_enabled: bool | None = None
+
+
 class AttributionOut(BaseModel):
     facts: list[AttributionFactItem]
     memories: list[AttributionMemoryItem]
     retrieval: AttributionRetrievalOut | None = None
+    active_turns_selected: list[AttributionActiveTurnOut] = []
+    active_turns_floor: list[int] = []
+    packer: AttributionPackerOut | None = None
 
 
 class MemoryEpisodeOut(BaseModel):

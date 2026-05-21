@@ -29,6 +29,7 @@ from app.services.context_manager import (
     build_enhanced_context,
     compression_lock,
     count_active_prompt_tokens,
+    count_active_transcript_tokens,
     reduce_until_under,
     run_post_turn_compression,
     track_background_task,
@@ -218,17 +219,39 @@ async def chat(
             enhanced = await build_enhanced_context(
                 db, user_id, session_id, user_message
             )
-            if (
-                count_active_prompt_tokens(
-                    db,
+            transcript_tokens = count_active_transcript_tokens(
+                db, user_id, session_id
+            )
+            packed_tokens = count_active_prompt_tokens(
+                db,
+                user_id,
+                session_id,
+                enhanced=enhanced,
+                current_query=user_message,
+            )
+            logger.info(
+                "chat_context user_id=%s session_id=%s retrieval_mode=%s "
+                "facts_injected=%s cross_session_memories=%s in_session_memories=%s "
+                "transcript_tokens=%s packed_tokens=%s compression_triggered=false",
+                user_id,
+                session_id,
+                enhanced.retrieval.mode.value,
+                len(enhanced.injected_facts),
+                len(enhanced.cross_session_memories),
+                len(enhanced.in_session_memories),
+                transcript_tokens,
+                packed_tokens,
+            )
+            if transcript_tokens > settings.context_threshold_tokens:
+                compressed_this_turn = True
+                logger.info(
+                    "chat_context user_id=%s session_id=%s compression_triggered=true "
+                    "transcript_tokens=%s threshold=%s",
                     user_id,
                     session_id,
-                    enhanced=enhanced,
-                    current_query=user_message,
+                    transcript_tokens,
+                    settings.context_threshold_tokens,
                 )
-                > settings.context_threshold_tokens
-            ):
-                compressed_this_turn = True
                 try:
                     await reduce_until_under(
                         db, user_id, session_id, enhanced=enhanced
@@ -258,13 +281,7 @@ async def chat(
                     db, user_id, session_id, user_message
                 )
                 if (
-                    count_active_prompt_tokens(
-                        db,
-                        user_id,
-                        session_id,
-                        enhanced=enhanced,
-                        current_query=user_message,
-                    )
+                    count_active_transcript_tokens(db, user_id, session_id)
                     > settings.context_threshold_tokens
                 ):
                     raise HTTPException(

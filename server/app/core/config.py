@@ -91,7 +91,7 @@ class Settings(BaseSettings):
     memory_gate_enabled: bool = True
     memory_gate_min_confidence: float = 0.75
     memory_gate_max_candidates: int = 10
-    memory_extraction_skip_if_no_signals: bool = True
+    memory_extraction_skip_if_no_signals: bool = False
 
     # Postgres caches
     embedding_cache_ttl_seconds: int = 7 * 24 * 3600

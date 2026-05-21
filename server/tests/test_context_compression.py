@@ -18,6 +18,7 @@ from app.services.context_manager import (
     build_completion_messages,
     build_enhanced_context,
     count_active_prompt_tokens,
+    count_active_transcript_tokens,
     load_active_message_episodes,
     reduce_until_under,
 )
@@ -113,7 +114,7 @@ async def test_compression_offloads_messages_and_creates_memory(
     with SessionLocal() as db:
         set_tenant_context(db, user.id)
         _seed_messages(db, user.id, session_id, pairs=6)
-        tokens_before = count_active_prompt_tokens(db, user.id, session_id)
+        tokens_before = count_active_transcript_tokens(db, user.id, session_id)
         assert tokens_before > compression_settings.context_threshold_tokens
 
         metrics = await reduce_until_under(db, user.id, session_id)
@@ -145,7 +146,7 @@ async def test_compression_offloads_messages_and_creates_memory(
         assert memory_rows[0].embedding is not None
         assert memory_rows[0].content == "Compressed summary of offloaded turns."
 
-        tokens_after = count_active_prompt_tokens(db, user.id, session_id)
+        tokens_after = count_active_transcript_tokens(db, user.id, session_id)
         assert tokens_after <= compression_settings.context_threshold_tokens
 
     summarize.assert_awaited()
@@ -323,3 +324,41 @@ async def test_missing_gemini_key_raises_when_over_threshold(
         assert exc_info.value.reason == CompressionFailureReason.MISSING_GEMINI_KEY
 
     get_settings.cache_clear()
+
+
+@pytest.mark.asyncio
+async def test_compression_uses_transcript_not_packed_tokens(
+    user_a,
+    compression_settings,
+    mock_compression_apis,
+):
+    """Selective packing keeps packed prompt small; compression still runs on transcript."""
+    user, _token = user_a
+    session_id = f"selective-{uuid.uuid4().hex[:8]}"
+
+    with SessionLocal() as db:
+        set_tenant_context(db, user.id)
+        _seed_messages(db, user.id, session_id, pairs=6)
+
+        with patch.object(compression_settings, "selective_context_enabled", True), patch.object(
+            compression_settings, "prompt_token_budget", 150
+        ), patch.object(compression_settings, "active_retrieval_floor_turns", 2):
+            transcript = count_active_transcript_tokens(db, user.id, session_id)
+            packed = count_active_prompt_tokens(db, user.id, session_id)
+            assert transcript > compression_settings.context_threshold_tokens
+            assert packed < transcript
+
+            metrics = await reduce_until_under(db, user.id, session_id)
+
+        assert metrics.compression_attempted is True
+        assert metrics.compression_succeeded is True
+
+        set_tenant_context(db, user.id)
+        memory_rows = db.scalars(
+            select(Episode).where(
+                Episode.user_id == user.id,
+                Episode.session_id == session_id,
+                Episode.episode_kind == "memory",
+            )
+        ).all()
+        assert len(memory_rows) >= 1

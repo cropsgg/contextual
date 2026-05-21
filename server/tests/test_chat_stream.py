@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from app.core.config import get_settings
+from app.core.config import get_settings, settings
 from app.services.retrieval_status import AssembledContext, RetrievalMode, RetrievalOutcome
 from tests.conftest import auth, user_a
 
@@ -163,3 +163,34 @@ def test_chat_stream_error_shape(client, user_a, chat_stream_settings):
     assert err is not None
     assert "message" in err
     assert "code" in err
+
+
+def test_selective_context_disabled_matches_legacy_pack(db, user_a):
+    from app.models.episode import Episode
+    from app.services.context_manager import _build_completion_messages_uncached
+    from app.services.context_packer import _build_legacy_messages
+    from app.services.rls import set_bypass_rls, set_tenant_context
+
+    user, _token = user_a
+    session_id = str(uuid.uuid4())
+    set_bypass_rls(db)
+    for i in range(4):
+        db.add(
+            Episode(
+                user_id=user.id,
+                session_id=session_id,
+                episode_kind="message",
+                role="user" if i % 2 == 0 else "assistant",
+                content=f"turn {i} content",
+                embed_status="pending",
+            )
+        )
+    db.commit()
+    set_tenant_context(db, user.id)
+
+    with patch.object(settings, "selective_context_enabled", False):
+        legacy = _build_legacy_messages(db, user.id, session_id, None)
+        packed = _build_completion_messages_uncached(
+            db, user.id, session_id, None, current_query="turn 0"
+        )
+    assert legacy == packed

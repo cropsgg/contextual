@@ -85,8 +85,9 @@ export function ChatShell() {
   const abortRef = useRef<AbortController | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
 
-  const devToolsEnabled = isDevToolsEnabledFromEnv() || debugFromUrl;
+  const engineeringUiEnabled = isDevToolsEnabledFromEnv() || debugFromUrl;
   const expertEnabled = userHasExpertPreview(user);
+  const settingsVisible = engineeringUiEnabled || expertEnabled;
 
   useEffect(() => {
     setDebugFromUrl(isDebugQueryEnabled(window.location.search));
@@ -414,7 +415,9 @@ export function ChatShell() {
                 </button>
               }
             >
-              <DropdownMenuItem href="/settings">Settings</DropdownMenuItem>
+              {settingsVisible ? (
+                <DropdownMenuItem href="/settings">Settings</DropdownMenuItem>
+              ) : null}
               {user.role === "admin" ? (
                 <DropdownMenuItem href="/admin">Admin</DropdownMenuItem>
               ) : null}
@@ -440,7 +443,7 @@ export function ChatShell() {
             <p className="mx-3 mt-2 text-xs text-ink-muted">{sessionNotice}</p>
           ) : null}
 
-          {devToolsEnabled ? (
+          {engineeringUiEnabled ? (
             <ContextMonitor
               sessionId={sessionId}
               token={token}
@@ -537,7 +540,7 @@ export function ChatShell() {
             <span className="ml-auto truncate text-xs text-ink-faint">
               {quotaBarLabel(user.quota ?? undefined)}
             </span>
-          ) : devToolsEnabled && sessionId ? (
+          ) : engineeringUiEnabled && sessionId ? (
             <span className="ml-auto truncate font-mono text-xs text-ink-faint">
               {sessionId}
             </span>
@@ -571,6 +574,7 @@ export function ChatShell() {
                 sessionId={sessionId}
                 token={token}
                 onUnauthorized={logout}
+                showAttribution={engineeringUiEnabled}
               />
             ))}
             <div ref={bottomRef} />

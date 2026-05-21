@@ -12,6 +12,8 @@ type ChatMessageProps = {
   sessionId: string | null;
   token: string;
   onUnauthorized: () => void;
+  /** When false, hide Sources / attribution (normal chat UX). */
+  showAttribution?: boolean;
 };
 
 function TypingIndicator() {
@@ -32,9 +34,14 @@ export function ChatMessage({
   sessionId,
   token,
   onUnauthorized,
+  showAttribution: showAttributionUi = false,
 }: ChatMessageProps) {
   const showAttribution =
-    role === "assistant" && messageId && !isStreaming && Boolean(content);
+    showAttributionUi &&
+    role === "assistant" &&
+    messageId &&
+    !isStreaming &&
+    Boolean(content);
 
   return (
     <motion.div

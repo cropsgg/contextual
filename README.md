@@ -1,6 +1,6 @@
-# The Contextual Maestro — Phase 1–4
+# The Contextual Maestro — Phase 1–5
 
-Full-stack chat app: **Next.js** frontend (Bun), **FastAPI** backend, **PostgreSQL + pgvector**, **DeepSeek** streaming chat, **Phase 2** context compression, **Phase 3** cross-session memory and user facts, and **Phase 4** RLS isolation, episodic memory management, Expert Mode prompt preview, rate limiting, and Docker Compose for the full stack.
+Full-stack chat app: **Next.js** frontend (Bun), **FastAPI** backend, **PostgreSQL + pgvector**, **DeepSeek** streaming chat, **Phase 2** context compression, **Phase 3** cross-session memory and user facts, **Phase 4** RLS isolation, episodic memory management, Expert Mode prompt preview, rate limiting, and **Phase 5** selective active-turn retrieval (query-aware prompt packing under an 8K token budget).
 
 ## Prerequisites
 
@@ -77,8 +77,8 @@ Open [http://localhost:3000](http://localhost:3000).
 The product UI is a **simple chatbot**: sign in, pick or start a conversation, and send messages. Context engineering (compression, retrieval, fact extraction, RLS isolation) runs **automatically on the server** on every chat request—users are not asked to manage memory or facts in the main UI.
 
 - **Sidebar:** New chat (creates a `chat_sessions` row), conversation list with title + preview, rename/delete.
-- **Chat:** SSE streaming (`POST /api/chat`), Stop to abort (partial assistant text is discarded), optional **Sources** on replies when attribution exists.
-- **Settings** (`/settings`): Memory tab (facts, episodes, clear memory) and **Expert** tab when enabled (read-only prompt preview before send).
+- **Chat:** SSE streaming (`POST /api/chat`), Stop to abort (partial assistant text is discarded). No Sources panel or context widgets in the default UI.
+- **Settings** (`/settings`): Hidden for normal users. **Expert** tab (prompt preview) when `expert_preview_enabled`; **Memory** inspector only with dev tools (below).
 
 **Expert preview:** `POST /api/chat/preview` is gated by `users.expert_preview_enabled` or `role=admin`. Preview runs compression in **dry-run** mode and rolls back — it does not mutate stored episodes. Seed an admin via `ADMIN_EMAIL` / `ADMIN_PASSWORD` in `server/.env` (see `.env.example`).
 
@@ -86,7 +86,7 @@ The product UI is a **simple chatbot**: sign in, pick or start a conversation, a
 
 **Two-account setup:** Set `ADMIN_EMAIL` / `ADMIN_PASSWORD` in `server/.env` and restart the API for the admin account. Register a normal user via the app login screen (open registration).
 
-**Developer tools:** set `NEXT_PUBLIC_DEV_TOOLS=1` in `client/.env.local`, or open the app with `?debug=1`, to show the context monitor and session UUID in the header.
+**Developer tools:** set `NEXT_PUBLIC_DEV_TOOLS=1` in `client/.env.local`, or open the app with `?debug=1`, to show the context monitor, **Sources** on replies (facts, memories, selective-turn picks), memory settings, and session UUID in the header.
 
 ### Chat streaming (SSE)
 
@@ -132,6 +132,17 @@ Tune `CONTEXT_THRESHOLD_TOKENS` (default `4000`) and `MIN_RECENT_MESSAGES_TO_KEE
 See `docs/fact-extraction-ops.md` and `docs/caching-ops.md`.
 
 Phase 3 injects `<user_profile>`, `<relevant_past_context>`, and optionally `<in_session_memory>` before the latest `Compressed context` block. Cross-session retrieval degrades to keyword search or surfaces **unavailable** in context status (never silent fail-open). `memory_paused` means compression failed; `retrieval_degraded` means cross-session recall is degraded. Attribution lists only facts/memories actually injected; see `docs/retrieval-ops.md` for ANN index tuning.
+
+### Phase 5 environment variables
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `SELECTIVE_CONTEXT_ENABLED` | `true` | Query-aware active-turn packing (`false` = legacy: all active messages) |
+| `PROMPT_TOKEN_BUDGET` | `8000` | Max tokens in assembled prompt per chat turn |
+| `ACTIVE_RETRIEVAL_FLOOR_TURNS` | `6` | Recent turns always sent verbatim |
+| `ACTIVE_RETRIEVAL_TOP_K` | `8` | Max retrieved turns (before neighbour expansion) |
+
+See `docs/selective-context-ops.md` for scoring weights, chunking, troubleshooting, and attribution fields.
 
 ## API summary
 

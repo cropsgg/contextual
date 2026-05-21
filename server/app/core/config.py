@@ -97,6 +97,21 @@ class Settings(BaseSettings):
     prompt_assembly_cache_ttl_seconds: int = 45
     prompt_assembly_cache_enabled: bool = False
 
+    # Phase 5: selective active-turn retrieval
+    selective_context_enabled: bool = True
+    prompt_token_budget: int = 8000
+    active_retrieval_floor_turns: int = 6
+    active_retrieval_top_k: int = 8
+    active_turn_chunk_threshold_tokens: int = 1000
+    active_turn_chunk_size_tokens: int = 500
+    active_turn_chunk_overlap_tokens: int = 50
+    scoring_weight_vector: float = 0.55
+    scoring_weight_bm25: float = 0.20
+    scoring_weight_recency: float = 0.15
+    scoring_weight_entity: float = 0.10
+    recency_half_life_turns: int = 20
+    mmr_lambda: float = 0.7
+
     # Seeded admin (same login URL as users; expert preview enabled)
     admin_email: str = ""
     admin_password: str = ""

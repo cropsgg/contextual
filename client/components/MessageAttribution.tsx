@@ -31,10 +31,26 @@ export type AttributionRetrieval = {
   failure_reason?: string | null;
 };
 
+export type AttributionActiveTurn = {
+  episode_id: number;
+  score?: number;
+  reason?: string;
+};
+
+export type AttributionPacker = {
+  budget?: number;
+  tokens_used?: number;
+  evictions?: number;
+  selective_context_enabled?: boolean;
+};
+
 export type Attribution = {
   facts: AttributionFact[];
   memories: AttributionMemory[];
   retrieval?: AttributionRetrieval | null;
+  active_turns_selected?: AttributionActiveTurn[];
+  active_turns_floor?: number[];
+  packer?: AttributionPacker | null;
 };
 
 type Props = {
@@ -72,13 +88,16 @@ export function MessageAttribution({
       );
       const hasFacts = attr.facts.length > 0;
       const hasMemories = attr.memories.length > 0;
+      const hasActiveTurns = (attr.active_turns_selected?.length ?? 0) > 0;
       const retrieval = attr.retrieval;
       const showDegradedOnly =
         !hasFacts &&
         !hasMemories &&
+        !hasActiveTurns &&
         retrieval &&
         retrieval.cross_session_memory_available === false;
-      const hasContent = hasFacts || hasMemories || showDegradedOnly;
+      const hasContent =
+        hasFacts || hasMemories || hasActiveTurns || showDegradedOnly;
       setData(hasContent ? attr : null);
     } catch (e) {
       if (axios.isAxiosError(e) && e.response?.status === 401) {
@@ -177,6 +196,41 @@ export function MessageAttribution({
                     </li>
                   ))}
                 </ul>
+              </motion.div>
+            ) : null}
+            {data.active_turns_selected &&
+            data.active_turns_selected.length > 0 ? (
+              <motion.div className="mb-2">
+                <p className="mb-1 font-medium text-zinc-400">
+                  Selected from history
+                </p>
+                <ul className="space-y-1 text-zinc-300">
+                  {data.active_turns_selected.map((t) => (
+                    <li key={t.episode_id} className="font-mono text-[10px]">
+                      #{t.episode_id}
+                      {t.score != null
+                        ? ` · ${Math.round(t.score * 100)}%`
+                        : ""}
+                      {t.reason ? ` · ${t.reason}` : ""}
+                    </li>
+                  ))}
+                </ul>
+                {data.active_turns_floor &&
+                data.active_turns_floor.length > 0 ? (
+                  <p className="mt-1 text-[10px] text-zinc-500">
+                    Always included: last {data.active_turns_floor.length}{" "}
+                    turns (#{data.active_turns_floor.join(", #")})
+                  </p>
+                ) : null}
+                {data.packer?.tokens_used != null ? (
+                  <p className="mt-1 text-[10px] text-zinc-500">
+                    Prompt ~{data.packer.tokens_used}/
+                    {data.packer.budget ?? "?"} tokens
+                    {data.packer.evictions
+                      ? ` · ${data.packer.evictions} evicted`
+                      : ""}
+                  </p>
+                ) : null}
               </motion.div>
             ) : null}
             {retrieval &&

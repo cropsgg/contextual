@@ -34,6 +34,15 @@ class Episode(Base):
     )
     metadata_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     embedding: Mapped[list[float] | None] = mapped_column(Vector(_EMBED_DIM), nullable=True)
+    token_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    embed_status: Mapped[str] = mapped_column(String(16), default="pending", index=True)
+    parent_episode_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("episodes.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    chunk_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),

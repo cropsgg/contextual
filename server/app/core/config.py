@@ -24,6 +24,8 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 60 * 24 * 7  # 7 days
     cors_origins: str = "http://localhost:3000"
+    # Appended to CORS allowlist (e.g. Railway UI public URL when Next proxies /api).
+    frontend_public_url: str = ""
     environment: str = "development"
     message_max_length: int = 8000
     chat_rate_limit: str = "30/minute"
@@ -118,7 +120,11 @@ class Settings(BaseSettings):
 
     @property
     def cors_origins_list(self) -> list[str]:
-        return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+        origins = [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+        if self.frontend_public_url.strip():
+            origins.append(self.frontend_public_url.strip())
+        # Stable order, no duplicates
+        return list(dict.fromkeys(origins))
 
 
 @lru_cache

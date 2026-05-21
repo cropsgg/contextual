@@ -92,6 +92,10 @@ cd server && pytest tests/test_turn_embedding.py tests/test_active_turn_retrieva
 
 ## Railway UI + API
 
-- **API service**: Dockerfile listens on `$PORT`; set DB URLs, `JWT_SECRET`, keys, and `CORS_ORIGINS` to your UI public URL (e.g. `https://contextual-production-a977.up.railway.app`).
-- **UI service**: set runtime `BACKEND_URL` to the API public URL (e.g. `https://glistening-determination-production-f71b.up.railway.app`). The browser calls same-origin `/api/*`; Next rewrites to the backend. Do not rely on `NEXT_PUBLIC_API_URL=localhost` in production builds.
+- **API service** (`glistening-determination`): `$PORT` bind; DB URLs, `JWT_SECRET`, keys. CORS must allow the UI origin:
+  - `CORS_ORIGINS=https://contextual-production-a977.up.railway.app` **or**
+  - `FRONTEND_PUBLIC_URL=https://contextual-production-a977.up.railway.app`
+  - Without this, proxied `OPTIONS /api/auth/*` returns **400 Disallowed CORS origin**.
+- **UI service** (`contextual`): runtime **`BACKEND_URL`** = API public URL (e.g. `https://glistening-determination-production-f71b.up.railway.app`). Production builds ignore `NEXT_PUBLIC_API_URL` and call same-origin `/api/*`.
+- Remove `NEXT_PUBLIC_API_URL` from the UI service if set to the API host (causes cross-origin calls and CORS failures).
 - Auth routes are **POST** only: `/api/auth/register`, `/api/auth/login` (GET returns 405).

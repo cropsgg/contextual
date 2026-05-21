@@ -645,8 +645,17 @@ def _admin_database_name() -> str:
     return name
 
 
+# Serialize role/grant bootstrap — concurrent Railway replicas otherwise race on
+# GRANT CONNECT (pg_database "tuple concurrently updated").
+_BOOTSTRAP_ADVISORY_LOCK_KEY = 87234921
+
+
 def _ensure_app_role(conn) -> None:
     """Create non-superuser app role so FORCE RLS applies to API connections."""
+    conn.execute(
+        text("SELECT pg_advisory_xact_lock(:key)"),
+        {"key": _BOOTSTRAP_ADVISORY_LOCK_KEY},
+    )
     db_name = _admin_database_name()
     exists = conn.execute(
         text("SELECT 1 FROM pg_roles WHERE rolname = 'contextual_app'")
@@ -668,8 +677,17 @@ def _ensure_app_role(conn) -> None:
                 """
             )
         )
-    grants = [
-        f"GRANT CONNECT ON DATABASE {db_name} TO contextual_app",
+    needs_connect = conn.execute(
+        text(
+            "SELECT NOT has_database_privilege('contextual_app', :db, 'CONNECT')"
+        ),
+        {"db": db_name},
+    ).scalar()
+    grants: list[str] = []
+    if needs_connect:
+        grants.append(f"GRANT CONNECT ON DATABASE {db_name} TO contextual_app")
+    grants.extend(
+        [
         "GRANT USAGE, CREATE ON SCHEMA public TO contextual_app",
         "GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO contextual_app",
         "GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO contextual_app",
@@ -681,7 +699,8 @@ def _ensure_app_role(conn) -> None:
             "ALTER DEFAULT PRIVILEGES IN SCHEMA public "
             "GRANT USAGE, SELECT ON SEQUENCES TO contextual_app"
         ),
-    ]
+        ]
+    )
     for stmt in grants:
         conn.execute(text(stmt))
 

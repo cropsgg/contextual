@@ -3,6 +3,7 @@
 import logging
 
 from sqlalchemy import create_engine, text
+from sqlalchemy.engine.url import make_url
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from app.core.config import settings
@@ -120,9 +121,14 @@ def migrate_schema() -> None:
             _migrate_fact_v2_and_caches(conn, dim)
             _migrate_user_roles_and_admin_seed(conn)
             _migrate_token_quotas(conn)
-            from app.services.memory_keyword_search import ensure_memory_fts_index
+            _migrate_phase5_selective_context(conn)
+            from app.services.memory_keyword_search import (
+                ensure_active_turns_fts_index,
+                ensure_memory_fts_index,
+            )
 
             ensure_memory_fts_index(conn)
+            ensure_active_turns_fts_index(conn)
             _migrate_ann_index(conn)
             _migrate_rls(conn)
             _migrate_cache_rls(conn)
@@ -240,6 +246,37 @@ def _migrate_token_quotas(conn) -> None:
 
     conn.execute(text("ALTER TABLE token_usage_events ENABLE ROW LEVEL SECURITY"))
     conn.execute(text("ALTER TABLE token_usage_events FORCE ROW LEVEL SECURITY"))
+
+
+def _migrate_phase5_selective_context(conn) -> None:
+    """Per-turn embeddings and selective active-context retrieval."""
+    ddl = [
+        "ALTER TABLE episodes ADD COLUMN IF NOT EXISTS token_count INTEGER",
+        "ALTER TABLE episodes ADD COLUMN IF NOT EXISTS embed_status VARCHAR(16) NOT NULL DEFAULT 'pending'",
+        "ALTER TABLE episodes ADD COLUMN IF NOT EXISTS parent_episode_id INTEGER REFERENCES episodes(id) ON DELETE CASCADE",
+        "ALTER TABLE episodes ADD COLUMN IF NOT EXISTS chunk_index INTEGER",
+        """
+        CREATE INDEX IF NOT EXISTS idx_episodes_active_tail
+        ON episodes (user_id, session_id, episode_kind, is_offloaded)
+        WHERE episode_kind IN ('message', 'message_chunk') AND is_offloaded = FALSE
+        """,
+    ]
+    for stmt in ddl:
+        conn.execute(text(stmt))
+    conn.execute(
+        text(
+            "UPDATE episodes SET embed_status = 'ready' "
+            "WHERE episode_kind = 'memory' AND embedding IS NOT NULL "
+            "AND embed_status = 'pending'"
+        )
+    )
+    conn.execute(
+        text(
+            "UPDATE episodes SET embed_status = 'skipped' "
+            "WHERE episode_kind = 'message' AND is_offloaded = TRUE "
+            "AND embed_status = 'pending'"
+        )
+    )
 
 
 def _migrate_fact_v2_and_caches(conn, dim: int) -> None:
@@ -596,31 +633,43 @@ def _migrate_ann_index(conn) -> None:
         )
 
 
+def _admin_database_name() -> str:
+    """Database name from ADMIN_DATABASE_URL (e.g. maestro locally, railway on Railway)."""
+    url = make_url(settings.admin_database_url or settings.database_url)
+    name = url.database
+    if not name:
+        msg = "ADMIN_DATABASE_URL must include a database name (path after host/port)."
+        raise ValueError(msg)
+    if not name.replace("_", "").isalnum():
+        raise ValueError(f"Unsafe database name in connection URL: {name!r}")
+    return name
+
+
 def _ensure_app_role(conn) -> None:
     """Create non-superuser app role so FORCE RLS applies to API connections."""
+    db_name = _admin_database_name()
     exists = conn.execute(
         text("SELECT 1 FROM pg_roles WHERE rolname = 'contextual_app'")
     ).fetchone()
-    if exists:
-        return
 
-    pwd = settings.app_db_password.replace("'", "''")
-    conn.execute(
-        text(
-            f"""
-            DO $$
-            BEGIN
-              IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'contextual_app') THEN
-                CREATE ROLE contextual_app WITH LOGIN PASSWORD '{pwd}'
-                  NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;
-              END IF;
-            END
-            $$;
-            """
+    if not exists:
+        pwd = settings.app_db_password.replace("'", "''")
+        conn.execute(
+            text(
+                f"""
+                DO $$
+                BEGIN
+                  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'contextual_app') THEN
+                    CREATE ROLE contextual_app WITH LOGIN PASSWORD '{pwd}'
+                      NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;
+                  END IF;
+                END
+                $$;
+                """
+            )
         )
-    )
     grants = [
-        "GRANT CONNECT ON DATABASE maestro TO contextual_app",
+        f"GRANT CONNECT ON DATABASE {db_name} TO contextual_app",
         "GRANT USAGE, CREATE ON SCHEMA public TO contextual_app",
         "GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO contextual_app",
         "GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO contextual_app",

@@ -96,6 +96,6 @@ cd server && pytest tests/test_turn_embedding.py tests/test_active_turn_retrieva
   - `CORS_ORIGINS=https://contextual-production-a977.up.railway.app` **or**
   - `FRONTEND_PUBLIC_URL=https://contextual-production-a977.up.railway.app`
   - Without this, proxied `OPTIONS /api/auth/*` returns **400 Disallowed CORS origin**.
-- **UI service** (`contextual`): runtime **`BACKEND_URL`** = API public URL (e.g. `https://glistening-determination-production-f71b.up.railway.app`). Production builds ignore `NEXT_PUBLIC_API_URL` and call same-origin `/api/*`.
+- **UI service** (`contextual`): runtime **`BACKEND_URL`** = API public URL (required; e.g. `https://glistening-determination-production-f71b.up.railway.app`). Proxied via route handlers at request time (not build-time rewrites). Production builds ignore `NEXT_PUBLIC_API_URL` and call same-origin `/api/*`.
 - Remove `NEXT_PUBLIC_API_URL` from the UI service if set to the API host (causes cross-origin calls and CORS failures).
 - Auth routes are **POST** only: `/api/auth/register`, `/api/auth/login` (GET returns 405).

@@ -3,7 +3,6 @@
 import logging
 
 from sqlalchemy import create_engine, text
-from sqlalchemy.engine.url import make_url
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from app.core.config import settings
@@ -631,18 +630,6 @@ def _migrate_ann_index(conn) -> None:
                 """
             )
         )
-
-
-def _admin_database_name() -> str:
-    """Database name from ADMIN_DATABASE_URL (e.g. maestro locally, railway on Railway)."""
-    url = make_url(settings.admin_database_url or settings.database_url)
-    name = url.database
-    if not name:
-        msg = "ADMIN_DATABASE_URL must include a database name (path after host/port)."
-        raise ValueError(msg)
-    if not name.replace("_", "").isalnum():
-        raise ValueError(f"Unsafe database name in connection URL: {name!r}")
-    return name
 
 
 # Serialize role/grant bootstrap — concurrent Railway replicas otherwise race on

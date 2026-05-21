@@ -21,7 +21,8 @@ docker compose up --build
 ### Cloud / production (Docker Compose on a VM)
 
 1. Copy `.env.example` → `.env` at the repo root and set:
-   - `NEXT_PUBLIC_API_URL` — **public** API URL (e.g. `https://api.yourdomain.com`). This is embedded at **frontend image build** time; rebuild the frontend after changing it.
+   - `NEXT_PUBLIC_API_URL` — for **docker compose / local** direct browser→API calls (optional on Railway; see below).
+   - `BACKEND_URL` — on Railway **UI service only** (runtime): public API origin for `/api` rewrites (e.g. `https://api.yourdomain.com`).
    - `CORS_ORIGINS` — UI origin(s), comma-separated (e.g. `https://app.yourdomain.com`).
    - `JWT_SECRET` — strong unique secret (not the default).
    - `DEEPSEEK_API_KEY`, `GEMINI_API_KEY` — required for chat and memory.

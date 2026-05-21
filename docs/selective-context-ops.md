@@ -89,3 +89,9 @@ cd server && pytest tests/test_turn_embedding.py tests/test_active_turn_retrieva
 - Database path: `/railway` is fine — grants use the DB name from `ADMIN_DATABASE_URL` (no separate `maestro` database required).
 - Enable extension once in Query: `CREATE EXTENSION IF NOT EXISTS vector;`
 - Tables are created by the API on startup, not manually in the Data UI.
+
+## Railway UI + API
+
+- **API service**: Dockerfile listens on `$PORT`; set DB URLs, `JWT_SECRET`, keys, and `CORS_ORIGINS` to your UI public URL (e.g. `https://contextual-production-a977.up.railway.app`).
+- **UI service**: set runtime `BACKEND_URL` to the API public URL (e.g. `https://glistening-determination-production-f71b.up.railway.app`). The browser calls same-origin `/api/*`; Next rewrites to the backend. Do not rely on `NEXT_PUBLIC_API_URL=localhost` in production builds.
+- Auth routes are **POST** only: `/api/auth/register`, `/api/auth/login` (GET returns 405).

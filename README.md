@@ -1,6 +1,6 @@
 # The Contextual Maestro — Phase 1–5
 
-Full-stack chat app: **Next.js** frontend (Bun), **FastAPI** backend, **PostgreSQL + pgvector**, **DeepSeek** streaming chat, **Phase 2** context compression, **Phase 3** cross-session memory and user facts, **Phase 4** RLS isolation, episodic memory management, Expert Mode prompt preview, rate limiting, and **Phase 5** selective active-turn retrieval (query-aware prompt packing under an 8K token budget).
+Full-stack chat app: **Next.js** frontend (Bun), **FastAPI** backend, **PostgreSQL + pgvector**, **DeepSeek** streaming chat, with advanced context managment - the most optimal context manager 
 
 ## Prerequisites
 
